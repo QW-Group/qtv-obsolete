@@ -323,6 +323,7 @@ typedef enum {
 	QTVAM_PLAIN,
 	QTVAM_CCITT,
 	QTVAM_MD4,
+	QTVAM_SHA3_512,
 } authmethod_t;
 
 static qbool SV_QTVValidateAuthentication(authmethod_t authmethod, const char* password_supplied, const char* authchallenge, const char* our_password)
@@ -365,6 +366,20 @@ static qbool SV_QTVValidateAuthentication(authmethod_t authmethod, const char* p
 		return strcmp(password_supplied, hash) == 0;
 	}
 
+	if (authmethod == QTVAM_SHA3_512) {
+		sha3_context c;
+		const uint8_t *byte_hash;
+		char hex_hash[SHA3_512_DIGEST_HEX_STR_SIZE] = {0};
+
+		sha3_Init512(&c);
+		sha3_Update(&c, authchallenge, strlen(authchallenge));
+		sha3_Update(&c, our_password, strlen(our_password));
+		byte_hash = sha3_Finalize(&c);
+		sha3_512_ByteToHex(hex_hash, byte_hash);
+		return strcmp(password_supplied, hex_hash) == 0;
+	}
+
+
 	// Unknown authentication method
 	return false;
 }
@@ -379,7 +394,7 @@ static qbool SV_CheckForQTVRequest(cluster_t *cluster, oproxy_t *pend)
 	int parse_end;
 	char *e = (char *)pend->inbuffer;
 	char *s = e;
-	char password[128] = { 0 };
+	char password[256] = { 0 };
 	authmethod_t authmethod = QTVAM_NONE;
 
 	// Parse a QTV request.
@@ -475,6 +490,9 @@ static qbool SV_CheckForQTVRequest(cluster_t *cluster, oproxy_t *pend)
 						else if (!strcmp(colon, "MD4")) {
 							this_method = QTVAM_MD4;
 						}
+						else if (!strcmp(colon, "SHA3_512")) {
+							this_method = QTVAM_SHA3_512;
+						}
 						authmethod = max(authmethod, this_method);
 					}
 					else if (!strcmp(s, "PASSWORD")) {
@@ -523,39 +541,8 @@ static qbool SV_CheckForQTVRequest(cluster_t *cluster, oproxy_t *pend)
 	if (pend->flushing)
 		return false;
 
-	pend->authenticated = SV_QTVValidateAuthentication(authmethod, password, pend->authchallenge, qtv_password.string);
-
 	if (userinfo[0]) {
 		Info_Convert(&pend->ctx, userinfo);
-	}
-
-	if (!pend->authenticated) {
-		if (authmethod == QTVAM_CCITT && !password[0]) {
-			Net_ProxyPrintf(
-				pend, "%s"
-				"AUTH: CCITT\n"
-				"CHALLENGE: %s\n\n",
-				QTV_SV_HEADER(pend, QTV_VERSION),
-				pend->authchallenge
-			);
-		}
-		else if (authmethod == QTVAM_MD4 && !password[0]) {
-			Net_ProxyPrintf(
-				pend, "%s"
-				"AUTH: MD4\n"
-				"CHALLENGE: %s\n\n",
-				QTV_SV_HEADER(pend, QTV_VERSION),
-				pend->authchallenge
-			);
-		}
-		else {
-			Net_ProxyPrintf(pend, "%s"
-				"PERROR: Authentication failure\n\n",
-				QTV_SV_HEADER(pend, QTV_VERSION));
-
-			pend->flushing = true;
-		}
-		return false;
 	}
 
 	// Workaround for ezquake clients (possibly others) not re-sending source when replying to challenge
@@ -568,6 +555,50 @@ static qbool SV_CheckForQTVRequest(cluster_t *cluster, oproxy_t *pend)
 		}
 		else if (!strncmp(pend->authsource, "RECEIVE:", sizeof("RECEIVE:") - 1)) {
 			qtv = SV_ReadReceiveRequest(cluster, pend);
+		}
+	}
+
+	pend->authenticated = false;
+	if (qtv) {
+		const char* required = (qtv->custom_flags & QTV_CUSTOM_PASSWORD ? qtv->custom_password : qtv_password.string);
+
+		pend->authenticated = SV_QTVValidateAuthentication(authmethod, password, pend->authchallenge, required);
+		if (!pend->authenticated) {
+			if (authmethod == QTVAM_CCITT && !password[0]) {
+				Net_ProxyPrintf(
+					pend, "%s"
+					"AUTH: CCITT\n"
+					"CHALLENGE: %s\n\n",
+					QTV_SV_HEADER(pend, QTV_VERSION),
+					pend->authchallenge
+				);
+			}
+			else if (authmethod == QTVAM_MD4 && !password[0]) {
+				Net_ProxyPrintf(
+					pend, "%s"
+					"AUTH: MD4\n"
+					"CHALLENGE: %s\n\n",
+					QTV_SV_HEADER(pend, QTV_VERSION),
+					pend->authchallenge
+				);
+			}
+			else if (authmethod == QTVAM_SHA3_512 && !password[0]) {
+				Net_ProxyPrintf(
+					pend, "%s"
+					"AUTH: SHA3_512\n"
+					"CHALLENGE: %s\n\n",
+					QTV_SV_HEADER(pend, QTV_VERSION),
+					pend->authchallenge
+				);
+			}
+			else {
+				Net_ProxyPrintf(pend, "%s"
+					"PERROR: Authentication failure\n\n",
+					QTV_SV_HEADER(pend, QTV_VERSION));
+
+				pend->flushing = true;
+			}
+			return false;
 		}
 	}
 

@@ -290,12 +290,25 @@ void Cmd_StuffCmds (int argc, char *argv[])
 	}
 
 	if (build[0])
-		Cbuf_InsertText (build);
+		Cbuf_AddText (build);
 
 	Sys_free (text);
 	Sys_free (build);
 }
 
+void Cmd_ExcuteDefaultCfg (int argc, char *argv[])
+{
+	// If there was no +exec on cmd line then execute qtv.cfg,
+	// we have to check it since people for ages already have +exec qtv.cfg on cmd line
+	// and executing it second time may cause issues, so we trying to keep backward compatibility.
+	int i;
+	for (i = 1; i < argc; i++) {
+		if (!strnicmp(argv[i], "+exec", sizeof("+exec") - 1)) {
+			return;
+		}
+	}
+	Cbuf_InsertText("exec qtv.cfg");
+}
 
 /*
 ===============

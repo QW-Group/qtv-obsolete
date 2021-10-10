@@ -4,20 +4,77 @@ source related commadns
 
 #include "qtv.h"
 
+static void qtv_parse_options(qtvoptions_t* options, int first_arg)
+{
+	int i;
+
+	memset(options, 0, sizeof(*options));
+	for (i = first_arg; i < Cmd_Argc() - 1; ++i) {
+		if (!stricmp(Cmd_Argv(i), "password")) {
+			const char* custom_pw = Cmd_Argv(i + 1);
+
+			if (custom_pw[0]) {
+				options->flags |= QTV_CUSTOM_PASSWORD;
+				strlcpy(options->client_password, custom_pw, sizeof(options->client_password));
+
+				if (strlen(custom_pw) < sizeof(options->client_password)) {
+					Sys_Printf("... using custom password\n");
+				}
+				else {
+					Sys_Printf("... using custom password (WARNING: truncated)\n");
+				}
+			}
+			++i;
+		}
+		else if (!stricmp(Cmd_Argv(i), "delay")) {
+			const char* delay_ = Cmd_Argv(i + 1);
+			float delay = atof(delay_);
+
+			if (delay || delay_[0] == '0') {
+				Sys_Printf("... using custom delay (%fs)\n", delay);
+				options->flags |= QTV_CUSTOM_PARSEDELAY;
+				options->ingame_delay = delay;
+			}
+			++i;
+		}
+		else if (!stricmp(Cmd_Argv(i), "address")) {
+			const char* custom_addr = Cmd_Argv(i + 1);
+
+			// allow this to be blank
+			options->flags |= QTV_CUSTOM_ADDRESS;
+			strlcpy(options->address, custom_addr, sizeof(options->address));
+			Sys_Printf("... using custom address (%s)\n", options->address);
+
+			++i;
+		}
+		else {
+			Sys_Printf("... unknown option %s\n", Cmd_Argv(i));
+		}
+	}
+}
+
 // connect via tcp to qtv source, that may be other qtv or server or whatever
 void qtv_f(void)
 {
 	char addr[MAX_QPATH] = {0};
+	char* password = Cmd_Argv(2);
 	sv_t *qtv;
+	qtvoptions_t options;
 
 	if (Cmd_Argc() < 2 || !*Cmd_Argv(1)) // not less than one param, first param non empty
 	{
-		Sys_Printf("Usage: %s ip:port [password]\n", Cmd_Argv(0));
+		Sys_Printf("Usage: %s ip:port [password] [options]\n", Cmd_Argv(0));
+		Sys_Printf("Options:\n");
+		Sys_Printf("  password <password>      // password for connecting clients\n");
+		Sys_Printf("  delay <delay>            // in seconds (defaults to 'parse_delay')\n");
+		Sys_Printf("  address <address>        // address mvdsv will broadcast to server-browsers\n");
 		return;
 	}
 
+	qtv_parse_options(&options, 3);
+
 	snprintf(addr, sizeof(addr), "tcp:%s", Cmd_Argv(1));
-	qtv = QTV_NewServerConnection(&g_cluster, addr, Cmd_Argv(2), false, false, false, false);
+	qtv = QTV_NewServerConnection2(&g_cluster, addr, password, false, false, false, false, &options);
 
 	if (!qtv)
 	{

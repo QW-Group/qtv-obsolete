@@ -301,6 +301,7 @@ int main(int argc, char **argv)
 
 	Sys_Printf("QTV %s, build %i (build date: %s)\n", PROXY_VERSION, g_cluster.buildnumber, BUILD_DATE);
 
+	Cmd_ExcuteDefaultCfg(argc, argv);
 	// Process command line arguments.
 	Cmd_StuffCmds(argc, argv);
 	Cbuf_Execute();

@@ -140,6 +140,7 @@ SOCKET Net_TCPListenPort(int port)
 	qbool				error = true;
 	struct sockaddr_in	address = {0};
 	unsigned long		nonblocking = true;
+	int					reuseaddr = 1;
 
 	address.sin_family = AF_INET;
 	address.sin_addr.s_addr = INADDR_ANY;
@@ -150,6 +151,10 @@ SOCKET Net_TCPListenPort(int port)
 		// error.
 	}
 	else if (ioctlsocket (sock, FIONBIO, &nonblocking) == -1)
+	{
+		// error.
+	}
+	else if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&reuseaddr, sizeof(reuseaddr)) == -1)
 	{
 		// error.
 	}

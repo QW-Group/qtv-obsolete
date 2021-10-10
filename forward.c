@@ -311,7 +311,7 @@ void Net_SendConnectionMVD_1_0(sv_t *qtv, oproxy_t *prox)
 
 //	Sys_Printf("DBG: Net_SendConnectionMVD: map: %s\n", qtv->mapname);
 
-	if (qtv->qstate != qs_active || !*qtv->mapname || prox->download)
+	if (qtv->qstate != qs_active || !qtv->server_data_parsed || prox->download)
 	{
 //		Sys_Printf("DBG: Net_SendConnectionMVD: set flush\n");
 		prox->flushing = true; // so they get Net_SendConnectionMVD() ASAP later
@@ -388,7 +388,7 @@ void Net_SendConnectionMVD_NEW(sv_t *qtv, oproxy_t *prox)
 
 //	Sys_Printf("DBG: Net_SendConnectionMVD: map: %s\n", qtv->mapname);
 
-	if (qtv->qstate != qs_active || !*qtv->mapname || prox->download)
+	if (qtv->qstate != qs_active || !qtv->server_data_parsed || prox->download)
 	{
 //		Sys_Printf("DBG: Net_SendConnectionMVD: set flush\n");
 		prox->flushing = true; // so they get Net_SendConnectionMVD() ASAP later

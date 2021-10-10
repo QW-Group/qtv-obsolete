@@ -145,7 +145,7 @@ size_t HTTPSV_EscapeURL(const char *url, char *out, size_t outsize)
 {
 	char *out_buf = out;
 	const char *s = url;
-	const char *escaped_chars = " <>#%{}|\\^~[]`;/?:@=&$";
+	const char *escaped_chars = " <>#%{}|\\^~[]`;/?:@=&$'";
 	const char *hex = "0123456789ABCDEF";
 	size_t wrote_chars = 0;
 

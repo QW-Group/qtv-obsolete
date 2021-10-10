@@ -6,8 +6,6 @@
 
 #define Q_rint(x) ((x) > 0 ? (int) ((x) + 0.5) : (int) ((x) - 0.5))
 
-#define FTE_PEXT_FLOATCOORDS  0x00008000
-
 void InitNetMsg(netmsg_t *b, char *buffer, int bufferlength)
 {
 	memset (b, 0, sizeof (*b));

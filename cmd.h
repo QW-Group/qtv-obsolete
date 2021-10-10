@@ -124,6 +124,7 @@ void Cmd_ExecuteString (char *text);
 
 void Cmd_StuffCmds (int argc, char *argv[]);
 
+void Cmd_ExcuteDefaultCfg (int argc, char *argv[]);
 
 char *Cmd_RconCommand(char *cmd, char *buf, int buf_size);
 // put command in to execution buffer and run execution buffer, output will be in "buf"

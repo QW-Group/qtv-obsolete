@@ -98,6 +98,39 @@ void close_source(sv_t *qtv, const char *where)
 	init_source(qtv); // set source to state SRC_BAD, its safe call it since we free all resorces like SOCKET and FILE
 }
 
+// Examples of how server values should be mapped to src:
+// "tcp:hostname:port" -> ""
+// "tcp:hostname:port@hostname:port" -> "tcp:hostname:port"
+// Note that in the next case we also skip "tcp:" prefix
+// "tcp:streamId@hostname:port" -> "streamId"
+// "tcp:streamId@hostname:port@hostname:port" -> "tcp:streamId@hostname:port"
+// "file:filename.mvd@hostname:port" -> "file:filename.mvd"
+// "file:filename.mvd@hostname:port@hostname:port" -> "file:filename.mvd@hostname:port"
+static char *getSourceFromServer(const char *server, char *src, size_t src_sz)
+{
+	char *at;
+	strlcpy(src, server, src_sz);
+	at = strchrrev(src, '@');
+	// If source is not specified, return empty value.
+	if (at == NULL) {
+		src[0] = 0; // empty source.
+		return src;
+	}
+	// Cut last "host:port" value, there could be more in case of chaining.
+	at[0] = 0;
+	// Check if we have more "host:port", if we do then return as is.
+	if (strchrrev(src, '@')) {
+		return src;
+	}
+	// Check if we does NOT have "tcp:" prefix then return as is.
+	if (strncmp(src, "tcp:", 4)) {
+		return src;
+	}
+	// Skip "tcp:" prefix.
+	memmove(src, src + 4, strlen(src) - 4 + 1);
+	return src;
+}
+
 void Net_SendQTVConnectionRequest(sv_t *qtv, char *authmethod, char *challenge)
 {
 	qtv->qstate = qs_parsingQTVheader;
@@ -110,34 +143,14 @@ void Net_SendQTVConnectionRequest(sv_t *qtv, char *authmethod, char *challenge)
 	}
 	else
 	{
-		char *at;
+		char source[sizeof(qtv->server)] = "";
 		char hash[512];
 
-		at = strchrrev(qtv->server, '@');
+		getSourceFromServer(qtv->server, source, sizeof(source));
 
-		if (at)
-		{
-			char *str;
-
-			*at = '\0'; // Here we modifying qtv->server, OUCH
-
-			if (strncmp(qtv->server, "tcp:", 4))
-			{
-				str = qtv->server;
-			}
-			else
-			{
-			 	if ((str = strchr(qtv->server, ':')))
-					str++;
-			}
-
-			// hm, str may be NULL, so we send "SOURCE: \n", is this correct?
-			Net_UpstreamPrintf(qtv, "SOURCE: %s\n", str ? str : "");
-
-			*at = '@'; // restore qtv->server
-		}
-		else
-		{
+		if (source[0]) {
+			Net_UpstreamPrintf(qtv, "SOURCE: %s\n", source);
+		} else {
 			Net_UpstreamPrintf(qtv, "RECEIVE\n");
 		}
 
@@ -146,19 +159,25 @@ void Net_SendQTVConnectionRequest(sv_t *qtv, char *authmethod, char *challenge)
 			extern cvar_t address;
 
 			char userinfo[1024] = {0};
-			char temp[20] = { 0 };
+			char temp[1024] = { 0 };
+			char* this_address = ((qtv->custom_flags & QTV_CUSTOM_ADDRESS) ? qtv->custom_address : address.string);
 
-			snprintf (temp, sizeof (temp), "%u", qtv->streamid);
+			Sys_Printf("%d: Using address %s (%s:%d)\n", qtv->streamid, this_address, (qtv->custom_flags & QTV_CUSTOM_ADDRESS) ? "custom" : "std", qtv->custom_flags);
 
-			Info_SetValueForStarKey(userinfo, "name", hostname.string, sizeof(userinfo));
-			if (address.string[0])
-			{
-				Info_SetValueForStarKey (userinfo, "address", address.string, sizeof (userinfo));
+			// We might be connecting to server with different flags
+			snprintf(temp, sizeof(temp), "%s (%d)", hostname.string, qtv->streamid);
+
+			Info_SetValueForStarKey(userinfo, "name", temp, sizeof(userinfo));
+
+			if (this_address[0]) {
+				snprintf(temp, sizeof(temp), "%u", qtv->streamid);
+				Info_SetValueForStarKey (userinfo, "address", this_address, sizeof (userinfo));
 				Info_SetValueForStarKey (userinfo, "streamid", temp, sizeof (userinfo));
 			}
 
-			if (userinfo[0])
+			if (userinfo[0]) {
 				Net_UpstreamPrintf(qtv, "USERINFO: \"%s\"\n", userinfo);
+			}
 		}
 
 // qqshka: we do not use RAW at all, so do not bother
@@ -173,6 +192,19 @@ void Net_SendQTVConnectionRequest(sv_t *qtv, char *authmethod, char *challenge)
 				if (!strcmp(authmethod, "PLAIN"))
 				{
 					Net_UpstreamPrintf(qtv, "AUTH: PLAIN\nPASSWORD: \"%s\"\n", qtv->ConnectPassword);
+				}
+				else if (challenge && strlen(challenge)>=63 && !strcmp(authmethod, "SHA3_512"))
+				{
+					sha3_context c;
+					const uint8_t *byte_hash;
+
+					sha3_Init512(&c);
+					sha3_Update(&c, challenge, strlen(challenge));
+					sha3_Update(&c, qtv->ConnectPassword, strlen(qtv->ConnectPassword));
+					byte_hash = sha3_Finalize(&c);
+					sha3_512_ByteToHex(hash, byte_hash);
+
+					Net_UpstreamPrintf(qtv, "AUTH: SHA3_512\nPASSWORD: \"%s\"\n", hash);
 				}
 				else if (challenge && strlen(challenge)>=32 && !strcmp(authmethod, "CCITT"))
 				{
@@ -208,7 +240,7 @@ void Net_SendQTVConnectionRequest(sv_t *qtv, char *authmethod, char *challenge)
 			}
 			else
 			{
-				Net_UpstreamPrintf(qtv, "AUTH: MD4\nAUTH: CCITT\nAUTH: PLAIN\nAUTH: NONE\n");
+				Net_UpstreamPrintf(qtv, "AUTH: SHA3_512\nAUTH: MD4\nAUTH: CCITT\nAUTH: PLAIN\nAUTH: NONE\n");
 			}
 		}
 	}
@@ -554,7 +586,7 @@ static unsigned int QTV_GenerateStreamID(void)
 	}
 }
 
-sv_t *QTV_NewServerConnection(cluster_t *cluster, const char *server, char *password, qbool force, qbool autoclose, qbool noduplicates, qbool query)
+sv_t *QTV_NewServerConnection2(cluster_t *cluster, const char *server, char *password, qbool force, qbool autoclose, qbool noduplicates, qbool query, qtvoptions_t* options)
 {
 	sv_t *qtv;
 
@@ -591,6 +623,20 @@ sv_t *QTV_NewServerConnection(cluster_t *cluster, const char *server, char *pass
 
 	qtv->streamid = QTV_GenerateStreamID(); // assign stream ID
 
+	// apply options
+	if (options) {
+		qtv->custom_flags = options->flags;
+		if (options->flags & QTV_CUSTOM_ADDRESS) {
+			strlcpy(qtv->custom_address, options->address, sizeof(qtv->custom_address));
+		}
+		if (options->flags & QTV_CUSTOM_PARSEDELAY) {
+			qtv->custom_parse_delay = options->ingame_delay;
+		}
+		if (options->flags & QTV_CUSTOM_PASSWORD) {
+			strlcpy(qtv->custom_password, options->client_password, sizeof(qtv->custom_password));
+		}
+	}
+
 	// Connect to and link QTV to the cluster.
 	{
 		sv_t *last;
@@ -625,6 +671,11 @@ sv_t *QTV_NewServerConnection(cluster_t *cluster, const char *server, char *pass
 	cluster->NumServers++; // One more server connections.
 
 	return qtv;
+}
+
+sv_t* QTV_NewServerConnection(cluster_t* cluster, const char* server, char* password, qbool force, qbool autoclose, qbool noduplicates, qbool query)
+{
+	return QTV_NewServerConnection2(cluster, server, password, force, autoclose, noduplicates, query, NULL);
 }
 
 // add read/write stats for prox, qtv, cluster
@@ -1061,9 +1112,22 @@ qbool IsSourceStream(sv_t *qtv)
 	return (qtv->src.type == SRC_TCP || qtv->src.type == SRC_DEMO);
 }
 
+// mvdhidden_paused_duration(msec) embedded in dem_multiple(0) packet
+// used to tell us how much elapsed time has gone by when paused
+static qbool IsPausedTimeMessage(unsigned char* buffer, int length, unsigned char* elapsed_time)
+{
+	// expect buffer length 7 (more correct to not demand this but these packets are special case)
+	// <int: length> == 3, <short: type> == mvdhidden_paused_duration, <byte: elapsed_time> (returned)
+	if (length == 7 && LittleLong(*((int*)&buffer[0])) == 3 && LittleShort(*((short*)&buffer[4])) == mvdhidden_paused_duration) {
+		*elapsed_time = buffer[6];
+		return true;
+	}
+	return false;
+}
+
 // return non zero if we have at least one message
 // ms - will contain miliseconds.
-int ConsistantMVDDataEx(unsigned char *buffer, int remaining, int *ms)
+static int ConsistantMVDDataEx(unsigned char *buffer, int remaining, int *ms, qbool use_elapsed_time)
 {
 	qbool warn = true;
 	int lengthofs;
@@ -1075,6 +1139,8 @@ int ConsistantMVDDataEx(unsigned char *buffer, int remaining, int *ms)
 
 	while (true)
 	{
+		qbool hidden = false;
+
 		if (remaining < 2)
 		{
 			return available;
@@ -1093,9 +1159,11 @@ int ConsistantMVDDataEx(unsigned char *buffer, int remaining, int *ms)
 				break;
 		}
 
-		if (lengthofs + 4 > remaining)
-		{
+		if (lengthofs + 4 > remaining) {
 			return available;
+		}
+		if ((buffer[1] & dem_mask) == dem_multiple) {
+			hidden = (LittleLong(*((int*)&buffer[2])) == 0);
 		}
 
 		length = LittleLong(*((int *)&buffer[lengthofs]));
@@ -1115,18 +1183,22 @@ gottotallength:
 		}
 
 		// buffer[0] is the time since the last MVD message in miliseconds.
-		if (ms)
-			ms[0] += buffer[0];
+		if (ms) {
+			// use elapsed time if streaming, skip past it otherwise...
+			unsigned char elapsed_time;
+
+			if (use_elapsed_time && hidden && IsPausedTimeMessage(buffer + lengthofs, length - lengthofs, &elapsed_time)) {
+				ms[0] += elapsed_time;
+			}
+			else {
+				ms[0] += buffer[0];
+			}
+		}
 			
 		remaining -= length;
 		available += length;
 		buffer    += length;
 	}
-}
-
-int ConsistantMVDData(unsigned char *buffer, int remaining)
-{
-	return ConsistantMVDDataEx(buffer, remaining, NULL);
 }
 
 int ServerInGameState(sv_t *qtv)
@@ -1146,10 +1218,22 @@ int ServerInGameState(sv_t *qtv)
 	return 1;
 }
 
+static float ExpectedBuffer(sv_t* qtv)
+{
+	float ingame_delay = parse_delay.value;
+
+	if (qtv->custom_flags & QTV_CUSTOM_PARSEDELAY) {
+		ingame_delay = qtv->custom_parse_delay;
+	}
+
+	return max(ingame_delay, 0);
+}
+
 float GuessPlaybackSpeed(sv_t *qtv)
 {
 	int ms = 0;
-	float	demospeed, desired, current;
+	float demospeed, desired, current;
+	float ingame_delay = ExpectedBuffer(qtv);
 
 	if (qtv->qstate != qs_active)
 		return 1; // We are not ready, so use 100%.
@@ -1159,12 +1243,12 @@ float GuessPlaybackSpeed(sv_t *qtv)
 	if (qtv->src.type != SRC_TCP)
 		return 1;
 
-	ConsistantMVDDataEx(qtv->buffer, qtv->buffersize, &ms);
+	ConsistantMVDDataEx(qtv->buffer, qtv->buffersize, &ms, qtv->src.type == SRC_TCP && (qtv->extension_flags_mvd1 & MVD_PEXT1_HIDDEN_MESSAGES));
 
 	// Guess playback speed.
-	if (parse_delay.value)
+	if (ingame_delay)
 	{
-		desired = (ServerInGameState(qtv) ? parse_delay.value : 0.5); // In prewar use short delay.
+		desired = (ServerInGameState(qtv) ? ingame_delay : 0.5); // In prewar use short delay.
 		desired = bound(0.5, desired, 20.0); // Bound it to reasonable values.
 		current = 0.001 * ms;
 
@@ -1217,6 +1301,7 @@ int QTV_ParseMVD(sv_t *qtv)
 	int lengthofs;
 	int packettime;
 	int forwards = 0;
+	qbool low_latency_mode = (ExpectedBuffer(qtv) == 0);
 
 	float demospeed;
 
@@ -1228,18 +1313,21 @@ int QTV_ParseMVD(sv_t *qtv)
 	if (qtv->qstate <= qs_parsingQTVheader)
 		return 0; // We are not ready to parse.
 
-	demospeed = max(0.001, GuessPlaybackSpeed(qtv));
+	demospeed = (low_latency_mode ? 1.0f : max(0.001, GuessPlaybackSpeed(qtv)));
 
-	while (qtv->curtime >= qtv->parsetime)
+	while (low_latency_mode || qtv->curtime >= qtv->parsetime)
 	{
+		qbool hidden_message = false;
+
 		if (qtv->buffersize < 2)
 		{	
 			// Not enough stuff to play.
-			if (qtv->curtime > qtv->parsetime)
+			if (qtv->curtime > qtv->parsetime && !low_latency_mode)
 			{
-				qtv->parsetime = qtv->curtime + 2000;	// Add two seconds.
+				double delta = qtv->curtime - qtv->parsetime;
+				qtv->parsetime = qtv->curtime + (ExpectedBuffer(qtv) ? 2000 : 250);	// Add two seconds.
 				if (IsSourceStream(qtv))
-					Sys_Printf("%s: Not enough buffered #1\n", qtv->server);
+					Sys_Printf("%s: Not enough buffered #1 (%3.2f, %3.2f)\n", qtv->server, qtv->curtime / 1000.0f, delta / 1000.0f);
 			}
 			break;
 		}
@@ -1247,10 +1335,20 @@ int QTV_ParseMVD(sv_t *qtv)
 		buffer = qtv->buffer;
 		message_type = buffer[1] & dem_mask;
 
-		packettime     = (float)buffer[0] / demospeed;
+		// If streaming from server, use the elapsed time when paused rather than gametime
+		hidden_message = (message_type == dem_multiple && (qtv->extension_flags_mvd1 & MVD_PEXT1_HIDDEN_MESSAGES) && LittleLong(*((unsigned int*)&buffer[2])) == 0);
+		if (hidden_message && qtv->src.type == SRC_TCP && qtv->buffersize >= 13) {
+			unsigned char elapsed_time;
+			if (IsPausedTimeMessage(buffer + 6, 7, &elapsed_time)) {
+				// We're streaming, use elapsed time when paused
+				buffer[0] = elapsed_time;
+			}
+		}
+
+		packettime = (float)buffer[0] / demospeed;
 		nextpackettime = qtv->parsetime + packettime;
 
-		if (nextpackettime >= qtv->curtime)
+		if (nextpackettime >= qtv->curtime && !low_latency_mode)
 			break;
 
 		switch (message_type)
@@ -1259,19 +1357,22 @@ int QTV_ParseMVD(sv_t *qtv)
 			{
 				length = 10;
 
-				if (qtv->buffersize < length)
-				{	
-					// Not enough stuff to play.
-					qtv->parsetime = qtv->curtime + 2000;	// Add two seconds.
-					if (IsSourceStream(qtv))
-						Sys_Printf("%s: Not enough buffered #2\n", qtv->server);
-
-					continue;
+				if (qtv->buffersize < length) {
+					if (!low_latency_mode) {
+						// Not enough stuff to play.
+						qtv->parsetime = qtv->curtime + 2000;	// Add two seconds.
+						if (IsSourceStream(qtv))
+							Sys_Printf("%s: Not enough buffered #2\n", qtv->server);
+					}
+					// We willing to break outside of the while loop
+					// but we could not since we inside switch, so goto for the rescue.
+					goto after_while;
 				}
 
 				// We're about to destroy this data, so it had better be forwarded by now!
-				if (qtv->buffersize < length)
-					Sys_Error ("%s: QTV_ParseMVD: qtv->buffersize < length", qtv->server);
+				if (qtv->buffersize < length) {
+					Sys_Error("%s: QTV_ParseMVD: qtv->buffersize < length", qtv->server);
+				}
 
 				forwards++;
 				buffer[0] = packettime; // adjust packet time according to our demospeed.
@@ -1296,11 +1397,13 @@ int QTV_ParseMVD(sv_t *qtv)
 		}
 
 		if (qtv->buffersize < lengthofs + 4)
-		{	
-			// The size parameter doesn't fit.
-			if (IsSourceStream(qtv))
-				Sys_Printf("%s: Not enough buffered #3\n", qtv->server);
-			qtv->parsetime = qtv->curtime + 2000;	// Add two seconds
+		{
+			if (!low_latency_mode) {
+				// The size parameter doesn't fit.
+				if (IsSourceStream(qtv))
+					Sys_Printf("%s: Not enough buffered #3\n", qtv->server);
+				qtv->parsetime = qtv->curtime + 2000;	// Add two seconds
+			}
 			break;
 		}
 
@@ -1314,15 +1417,17 @@ int QTV_ParseMVD(sv_t *qtv)
 
 			close_source(qtv, "QTV_ParseMVD");
 
-			qtv->buffersize = qtv->UpstreamBufferSize = 0;			
+			qtv->buffersize = qtv->UpstreamBufferSize = 0;
 			break;
 		}
 
-		if (length + lengthofs + 4 > qtv->buffersize)
-		{
-			if (IsSourceStream(qtv))
-				Sys_Printf("%s: Not enough buffered #4\n", qtv->server);
-			qtv->parsetime = qtv->curtime + 2000;	// Add two seconds.
+		if (length + lengthofs + 4 > qtv->buffersize) {
+			if (!low_latency_mode) {
+				if (IsSourceStream(qtv)) {
+					Sys_Printf("%s: Not enough buffered #4\n", qtv->server);
+				}
+				qtv->parsetime = qtv->curtime + 2000;	// Add two seconds.
+			}
 			break;	// Can't parse it yet.
 		}
 
@@ -1335,8 +1440,10 @@ int QTV_ParseMVD(sv_t *qtv)
 				case dem_multiple:
 				{
 					// Read the player mask.
-					unsigned int mask = LittleLong(*((unsigned int *)&buffer[lengthofs - 4])); 
-					ParseMessage(qtv, messbuf, length, message_type, mask);
+					unsigned int mask = LittleLong(*((unsigned int *)&buffer[lengthofs - 4]));
+					if (mask || !(qtv->extension_flags_mvd1 & MVD_PEXT1_HIDDEN_MESSAGES)) {
+						ParseMessage(qtv, messbuf, length, message_type, mask);
+					}
 					break;
 				}
 				case dem_single:
@@ -1364,8 +1471,9 @@ int QTV_ParseMVD(sv_t *qtv)
 		length = lengthofs + 4 + length;	// Make length be the length of the entire packet
 
 		// We're about to destroy this data, so it had better be forwarded by now!
-		if (qtv->buffersize < length)
-			Sys_Error ("%s: QTV_ParseMVD: qtv->buffersize < length", qtv->server);
+		if (qtv->buffersize < length) {
+			Sys_Error("%s: QTV_ParseMVD: qtv->buffersize < length", qtv->server);
+		}
 
 		forwards++;
 		buffer[0] = packettime; // adjust packet time according to our demospeed.
@@ -1376,9 +1484,11 @@ int QTV_ParseMVD(sv_t *qtv)
 		qtv->parsetime = nextpackettime;
 
 		// qqshka: This was in original qtv, cause overflow in some cases.
-		if (qtv->src.type == SRC_DEMO)
+		if (qtv->src.type == SRC_DEMO) {
 			Net_ReadStream(qtv); // FIXME: remove me
+		}
 	}
+after_while:
 
 	// Advance reconnect time in two cases: 
 	//	1) when we have src 

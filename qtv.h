@@ -187,7 +187,7 @@ extern "C" {
 
 //======================================
 
-#define PROXY_VERSION    "1.12-dev"        // Release version of QTV (not protocol).
+#define PROXY_VERSION    "1.12-rc1"        // Release version of QTV (not protocol).
 #define QTV_VERSION      1.0f              // we are support up to this QTV version.
 #define QTV_PROJECT_URL  "https://github.com/deurk/qtv"
 #define QTV_HELP_URL     "https://github.com/deurk/qtv/wiki"
@@ -243,12 +243,17 @@ extern "C" {
 #define PROTOCOL_VERSION_FTE2   (('F'<<0) + ('T'<<8) + ('E'<<16) + ('2' << 24))	//fte extensions.
 #define PROTOCOL_VERSION_MVD1   (('M'<<0) + ('V'<<8) + ('D'<<16) + ('1' << 24)) //mvdsv extensions.
 
+#define QTV_CUSTOM_PARSEDELAY    (1)
+#define QTV_CUSTOM_PASSWORD      (2)
+#define QTV_CUSTOM_ADDRESS       (4)
+
 //======================================
 
 #include "qconst.h"
 #include "cmd.h"
 #include "cvar.h"
 #include "info.h"
+#include "sha3.h"
 
 typedef struct 
 {
@@ -530,6 +535,12 @@ struct sv_s
 	io_stat_t		socket_stat;					// read/write stats for socket
 	io_stat_t		proxies_socket_stat;			// read/write stats for proxies sockets
 
+	// Allows options to be set per-connection: aim for QTV on single port to support multiple connections
+	int             custom_flags;                   // combination of QTV_CUSTOM_*
+	float           custom_parse_delay;             // over-ride of parse_delay cvar
+	char            custom_password[64];            // over-ride of qtv_password cvar
+	char            custom_address[128];            // over-ride of address cvar
+
 	//
 	// Fields above saved on each QTV_Connect()
 	//
@@ -588,6 +599,7 @@ struct sv_s
 	char			gamedir[MAX_QPATH];
 	char			serverinfo[MAX_SERVERINFO_STRING];
 	movevars_t		movevars;
+	qbool           server_data_parsed;
 
 	int				clservercount;
 
@@ -602,15 +614,16 @@ struct sv_s
 	entity_state_t	spawnstatic[MAX_STATICENTITIES];
 	int				spawnstatic_count;
 
-	frame_t			frame[MAX_ENTITY_FRAMES];
+	frame_t         frame[MAX_ENTITY_FRAMES];
 
-	int				cdtrack;
+	int             cdtrack;
+	int             paused;
 
-	qbool			prev_was_svc_print;
-	qbool			svc_print_servername;			// Small hack to figure out if we should write 
-													// the servername when parsing svc_print messages
-													// since these can be split up. We don't want the
-													// servername to be printed in the middle of a chat message.
+	qbool           prev_was_svc_print;
+	qbool           svc_print_servername;           // Small hack to figure out if we should write
+	                                                // the servername when parsing svc_print messages
+	                                                // since these can be split up. We don't want the
+	                                                // servername to be printed in the middle of a chat message.
 
 	// mvdsv sends STAT_TIME directly to player, so it isn't in .mvd/qtv stream
 	//   but STAT_MATCHSTARTTIME is sent every time the player respawns, so can pick this value up and use a local offset to guess
@@ -771,6 +784,16 @@ unsigned long	Sys_HashKey(const char *str);						// Hash function.
 void			Get_Uptime(ullong uptime_seconds, unsigned int *days, unsigned int *h, unsigned int *m); // Converts uptime seconds to days hours and minutes.
 
 
+// Custom per-stream options
+typedef struct qtvoptions_s {
+	char client_password[64];
+	float ingame_delay;
+	char address[128];
+
+	int flags;
+} qtvoptions_t;
+
+
 //
 // token.c
 //
@@ -840,6 +863,10 @@ sv_t			*QTV_Stream_by_ID(unsigned int id);
 // malloc(qtv) and init, call QTV_Connect and link to servers list.
 sv_t			*QTV_NewServerConnection(cluster_t *cluster, const char *server, char *password, 
 								qbool force, qbool autoclose, qbool noduplicates, qbool query);
+
+// Same as QTV_NewServerConnection but allow specification of custom options
+sv_t* QTV_NewServerConnection2(cluster_t * cluster, const char* server, char* password,
+	qbool force, qbool autoclose, qbool noduplicates, qbool query, qtvoptions_t* options);
 
 // add read/write stats for prox, qtv, cluster.
 void			QTV_SocketIOStats(sv_t *qtv, int r, int w);
@@ -1129,6 +1156,36 @@ qbool			SV_IsBanned (struct sockaddr_in *addr);
 void			UDP_Init(void);
 void			SV_CheckUDPPort(cluster_t *cluster, int port);
 void			SV_UDP_Frame(cluster_t *cluster);
+
+// PROTOCOL EXTENSIONS
+#define FTE_PEXT_FLOATCOORDS  0x00008000
+
+// Commented out extensions don't affect QTV stream
+//#define MVD_PEXT1_FLOATCOORDS       (1 <<  0) // FTE_PEXT_FLOATCOORDS but for entity/player coords only
+//#define MVD_PEXT1_HIGHLAGTELEPORT   (1 <<  1) // Adjust movement direction for frames following teleport
+//#define MVD_PEXT1_SERVERSIDEWEAPON  (1 <<  2) // Server-side weapon selection
+//#define MVD_PEXT1_DEBUG_WEAPON      (1 <<  3) // Send weapon-choice explanation to server for logging
+//#define MVD_PEXT1_DEBUG_ANTILAG     (1 <<  4) // Send predicted positions to server (compare to antilagged positions)
+#define MVD_PEXT1_HIDDEN_MESSAGES   (1 <<  5) // dem_multiple(0) packets are in format (<length> <type-id>+ <packet-data>)*
+//#define MVD_PEXT1_SERVERSIDEWEAPON2 (1 <<  6) // Server-side weapon selection supports clc_mvd_weapon_full_impulse
+
+// hidden messages inserted into .mvd files
+// embedded in dem_multiple(0) - should be safely skipped in clients
+// format is <int:length> <short:type>*   where <type> is duplicated if 0xFFFF.  <length> is length of the data packet, not the header
+enum {
+	mvdhidden_antilag_position           = 0x0000,  // mvdhidden_antilag_position_header_t mvdhidden_antilag_position_t*
+	mvdhidden_usercmd                    = 0x0001,  // <byte: playernum> <byte:dropnum> <byte: msec, vec3_t: angles, short[3]: forward side up> <byte: buttons> <byte: impulse>
+	mvdhidden_usercmd_weapons            = 0x0002,  // <byte: source playernum> <int: items> <byte[4]: ammo> <byte: result> <byte*: weapon priority (nul terminated)>
+	mvdhidden_demoinfo                   = 0x0003,  // <short: block#> <byte[] content>
+	mvdhidden_commentary_track           = 0x0004,  // <byte: track#> [todo... <byte: audioformat> <string: short-name> <string: author(s)> <float: start-offset>?]
+	mvdhidden_commentary_data            = 0x0005,  // <byte: track#> [todo... format-specific]
+	mvdhidden_commentary_text_segment    = 0x0006,  // <byte: track#> [todo... <float: duration> <string: text (utf8)>]
+	mvdhidden_dmgdone                    = 0x0007,  // <byte: type-flags> <short: damaged ent#> <short: damaged ent#> <short: damage>
+	mvdhidden_usercmd_weapons_ss         = 0x0008,  // (same format as mvdhidden_usercmd_weapons)
+	mvdhidden_usercmd_weapon_instruction = 0x0009,  // <byte: playernum> <byte: flags> <int: sequence#> <int: mode> <byte[10]: weaponlist>
+	mvdhidden_paused_duration            = 0x000A,  // <byte: msec> ... actual time elapsed, not gametime (can be used to keep stream running) ... expected to be QTV only
+	mvdhidden_extended                   = 0xFFFF   // doubt we'll ever get here: read next short...
+};
 
 #ifdef __cplusplus
 }

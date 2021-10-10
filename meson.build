@@ -27,6 +27,7 @@ qtv_sources = [
 	'source_cmds.c',
 	'sys.c',
 	'token.c',
+	'sha3.c',
 	'udp.c'
 ]
 

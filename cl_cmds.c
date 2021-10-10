@@ -556,6 +556,7 @@ static void Clcmd_Download_f(sv_t *qtv, oproxy_t *prox)
 
 	char 	buffer[6];
 	netmsg_t msg;
+	int i;
 
 	if (Cmd_Argc() != 2)
 	{
@@ -579,25 +580,45 @@ static void Clcmd_Download_f(sv_t *qtv, oproxy_t *prox)
 
 	Sys_ReplaceChar(name, '\\', '/');
 
-	// MUST be in a subdirectory and not abosolute path
-	if (!allow_download.integer || !FS_SafePath(name) || !strstr(name, "/"))
+	// MUST be in a subdirectory and not absolute path
+	if (!allow_download.integer || !FS_SafePath(name)) {
 		goto deny_download;
+	}
 
-	if      (!strncmp(name, "skins/", sizeof("skins/")-1))
+	if (!strstr(name, "/")) {
+		allow_dl = false; // should be in subdir
+	}
+	else if (name[0] == '.') {
+		allow_dl = false; // relative is pointless
+	}
+	else if (((i = strlen(name)) < 3 ? 0 : !strncmp(name + i - 3, "/..", 4))) {
+		allow_dl = false; // no /.. at end (should be caught by FS_SafePath)
+	}
+	else if (strstr(name, "/../")) {
+		allow_dl = false; // // no /../ (should be caught by FS_SafePath)
+	}
+	else if (!strncmp(name, "skins/", sizeof("skins/") - 1)) {
 		allow_dl = allow_download_skins.integer;
-	else if (!strncmp(name, "progs/", sizeof("progs/")-1))
+	}
+	else if (!strncmp(name, "progs/", sizeof("progs/") - 1)) {
 		allow_dl = allow_download_models.integer;
-	else if (!strncmp(name, "sound/", sizeof("sound/")-1))
+	}
+	else if (!strncmp(name, "sound/", sizeof("sound/") - 1)) {
 		allow_dl = allow_download_sounds.integer;
-	else if (!strncmp(name, "maps/",  sizeof("maps/") -1))
+	}
+	else if (!strncmp(name, "maps/", sizeof("maps/") - 1)) {
 		allow_dl = allow_download_maps.integer;
-	else if (demo_requested)
+	}
+	else if (demo_requested) {
 		allow_dl = allow_download_demos.integer;
-	else
+	}
+	else {
 		allow_dl = allow_download_other.integer;
+	}
 
-	if (!allow_dl)
+	if (!allow_dl) {
 		goto deny_download;
+	}
 
 	// close previous download if any
 	Clcmd_CompleteDownload(qtv, prox);
@@ -807,7 +828,7 @@ static void Clcmd_send_list(sv_t *qtv, oproxy_t *prox, int svc)
 		return; // kidding us?
 	}
 
-	if (qtv->qstate != qs_active || !*qtv->mapname)
+	if (qtv->qstate != qs_active || !qtv->server_data_parsed)
 	{
 		Sys_Printf("%s: proxy #%i not ready for %s\n", qtv->server, prox->id, Cmd_Argv(0));
 		prox->flushing = true; // so they get Net_SendConnectionMVD() ASAP later
@@ -871,7 +892,7 @@ static void Clcmd_Spawn_f(sv_t *qtv, oproxy_t *prox)
 		return;
 	}
 
-	if (qtv->qstate != qs_active || !*qtv->mapname)
+	if (qtv->qstate != qs_active || !qtv->server_data_parsed)
 	{
 		Sys_Printf("%s: proxy not ready for %s\n", qtv->server, Cmd_Argv(0), prox->id);
 		prox->flushing = true; // so they get Net_SendConnectionMVD() ASAP later
@@ -909,6 +930,14 @@ static void Clcmd_Spawn_f(sv_t *qtv, oproxy_t *prox)
 	WriteString(&msg, "skins\n");
 	Prox_SendMessage(&g_cluster, prox, msg.data, msg.cursize, dem_read, (unsigned)-1);
 	msg.cursize = 0;
+
+	// if game is paused, inform proxy
+	if (qtv->paused) {
+		WriteByte(&msg, svc_setpause);
+		WriteByte(&msg, qtv->paused);
+		Prox_SendMessage(&g_cluster, prox, msg.data, msg.cursize, dem_read, (unsigned)-1);
+		msg.cursize = 0;
+	}
 
 	Net_TryFlushProxyBuffer(&g_cluster, prox);
 

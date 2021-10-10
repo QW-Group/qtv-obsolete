@@ -98,6 +98,7 @@ static void ParseServerData(sv_t *tv, netmsg_t *m, int to, unsigned int playerma
 	QTV_SetupFrames(tv); // This memset to 0 too some data and something also.
 
 	strlcpy(tv->status, "Receiving soundlist", sizeof(tv->status));
+	tv->server_data_parsed = true;
 
 	for (prox = tv->proxies; prox; prox = prox->next)
 		if (prox->qtv_ezquake_ext & QTV_EZQUAKE_EXT_DOWNLOAD) // We need it for clients with full download support.
@@ -1306,7 +1307,7 @@ void ParseMessage(sv_t *tv, char *buffer, int length, int to, int mask)
 			}
 			case svc_setpause:	// [qbyte] on / off
 			{
-				ReadByte(&buf);
+				tv->paused = ReadByte(&buf);
 				break;
 			}
 			// svc_signonnum		25	// [qbyte]  used for the signon sequence
@@ -1396,9 +1397,19 @@ void ParseMessage(sv_t *tv, char *buffer, int length, int to, int mask)
 			}
 			case svc_modellist:
 			{
+				const char* map;
+
 				i = ParseList(tv, &buf, tv->modellist, to, mask);
-				if (!i)
-				{
+
+				// If the map doesn't have friendly descriptive name, use basic instead
+				map = tv->modellist[1].name;
+				if (map[0] && !tv->mapname[0]) {
+					const char* trimmed = strchr(map, '/');
+
+					strlcpy(tv->mapname, trimmed && trimmed[1] ? trimmed + 1 : map, sizeof(tv->mapname));
+				}
+
+				if (!i) {
 					strlcpy(tv->status, "Prespawning", sizeof(tv->status));
 				}
 				break;
