@@ -11,11 +11,11 @@ endif
 
 STRIPFLAGS=--strip-unneeded --remove-section=.comment
 
-OBJS = cmd.o crc.o cvar.o forward.o forward_pending.o info.o main.o mdfour.o \
-       msg.o net_utils.o parse.o qw.o source.o source_cmds.o sys.o build.o token.o httpsv.o httpsv_generate.o \
-       cl_cmds.o fs.o ban.o udp.o sha3.o
+OBJS = src/cmd.o src/crc.o src/cvar.o src/forward.o src/forward_pending.o src/info.o src/main.o src/mdfour.o \
+       src/msg.o src/net_utils.o src/parse.o src/qw.o src/source.o src/source_cmds.o src/sys.o src/build.o src/token.o src/httpsv.o src/httpsv_generate.o \
+       src/cl_cmds.o src/fs.o src/ban.o src/udp.o src/sha3.o
 
-qtv: $(OBJS) qtv.h qconst.h
+qtv: $(OBJS) src/qtv.h src/qconst.h
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@.db -lm
 	$(STRIP) $(STRIPFLAGS) $@.db -o $@.bin
 
