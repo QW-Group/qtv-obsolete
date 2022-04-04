@@ -145,6 +145,6 @@ const char *FS_FileExtension (const char *in)
 // absolute paths are prohibited
 qbool FS_SafePath(const char *in)
 {
-	return ( (in[0] == '\\' || in[0] == '/' || strstr(in, "..") || (in[0] && in[1] == ':')) ? false : true );
+	return ( (in[0] == '\\' || in[0] == '/' || strstr(in, "../") || strstr(in, "..\\") || (in[0] && in[1] == ':')) ? false : true );
 }
 
