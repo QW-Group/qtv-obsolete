@@ -704,6 +704,22 @@ void HTTPSV_GenerateDemoListing(cluster_t *cluster, oproxy_t *dest)
 	HTTPSV_SendHTMLFooter(cluster, dest);
 }
 
+void HTTPSV_GenerateDemoFilenamesTxt(cluster_t *cluster, oproxy_t *dest)
+{
+	dest->_bufferautoadjustmaxsize_ = 1024 * 1024; // NOTE: this allow 1MB buffer...
+	char row_buf[1024];
+	int i;	
+
+	HTTPSV_SendHTTPHeader(cluster, dest, "200", "text/plain", true);
+
+	Cluster_BuildAvailableDemoList(cluster);
+	for (i = 0; i < cluster->availdemoscount; i++)
+	{
+		snprintf(row_buf, sizeof(row_buf), "%s%s", cluster->availdemos[i].name, CRLF);
+		Net_ProxySend(cluster, dest, row_buf, strlen(row_buf));
+	}
+}
+
 void HTTPSV_GenerateImage(cluster_t *cluster, oproxy_t *dest, char *imgfilename)
 {
 	int s;
