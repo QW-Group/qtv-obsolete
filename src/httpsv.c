@@ -528,9 +528,9 @@ void HTTPSV_GetMethod(cluster_t *cluster, oproxy_t *pend)
 	{
 		HTTPSV_GenerateDemoListing(cluster, pend);
 	}
-	else if (URLCOMPARE(getpath, "/demo_filenames.txt", skiplen))
+	else if (URLCOMPARE(getpath, "/demo_filenames", skiplen))
 	{
-		HTTPSV_GenerateDemoFilenamesTxt(cluster, pend);
+		HTTPSV_GenerateDemoFilenames(cluster, pend);
 	}
 	else if (!strcmp(getpath, "/style.css"))
 	{
