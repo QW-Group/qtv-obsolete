@@ -528,6 +528,10 @@ void HTTPSV_GetMethod(cluster_t *cluster, oproxy_t *pend)
 	{
 		HTTPSV_GenerateDemoListing(cluster, pend);
 	}
+	else if (URLCOMPARE(getpath, "/demo_filenames", skiplen))
+	{
+		HTTPSV_GenerateDemoFilenames(cluster, pend);
+	}
 	else if (!strcmp(getpath, "/style.css"))
 	{
 		HTTPSV_GenerateCSSFile(cluster, pend);
