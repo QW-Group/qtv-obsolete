@@ -101,7 +101,7 @@ size_t strlcpy(char *dst, const char *src, size_t siz)
 	return(s - src - 1);	/* count does not include NUL */
 }
 
-size_t strlcat(char *dst, char *src, size_t siz)
+size_t strlcat(char *dst, const char *src, size_t siz)
 {
 	register char *d = dst;
 	register const char *s = src;

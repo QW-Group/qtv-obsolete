@@ -160,7 +160,7 @@ int		qvsnprintf(char *buffer, size_t count, const char *format, va_list argptr);
 
 #if defined(__linux__) || defined(_WIN32) || defined(__CYGWIN__)
 size_t	strlcpy (char *dst, const char *src, size_t siz);
-size_t	strlcat (char *dst, char *src, size_t siz);
+size_t	strlcat (char *dst, const char *src, size_t siz);
 #endif
 
 #ifndef _WIN32
