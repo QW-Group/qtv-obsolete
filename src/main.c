@@ -70,6 +70,9 @@ void Cluster_BuildAvailableDemoList(cluster_t *cluster)
 					if (cluster->availdemoscount == sizeof(cluster->availdemos)/sizeof(cluster->availdemos[0]))
 						break;
 
+					if (ffd.nFileSizeLow == 0)
+						continue; // Ignore empty files
+
 					strlcpy(cluster->availdemos[cluster->availdemoscount].name, ffd.cFileName, sizeof(cluster->availdemos[0].name));
 					cluster->availdemos[cluster->availdemoscount].size = ffd.nFileSizeLow;
 					cluster->availdemos[cluster->availdemoscount].time = ffd.ftLastWriteTime.dwHighDateTime;
@@ -120,6 +123,9 @@ void Cluster_BuildAvailableDemoList(cluster_t *cluster)
 				
 				if (stat(fullname, &sb))
 					continue; // Some kind of error.
+
+				if (sb.st_size == 0)
+					continue; // Ignore empty files
 
 				strlcpy(cluster->availdemos[cluster->availdemoscount].name, ent->d_name, sizeof(cluster->availdemos[0].name));
 				cluster->availdemos[cluster->availdemoscount].size = sb.st_size;
