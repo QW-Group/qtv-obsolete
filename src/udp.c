@@ -17,7 +17,7 @@ UDP protocl related things. At the moment just support "status" connectionless f
 #define QW_MASTERS_FORCE_RE_INIT (60 * 60 * 24) // seconds, force re-init masters time to time, so we add proper masters if there was some ip/dns changes
 #define QW_MASTER_HEARTBEAT_SECONDS (60 * 5) // seconds, frequency of heartbeat
 
-#define QW_DEFAULT_MASTER_SERVERS "qwmaster.ocrana.de masterserver.exhale.de master.quakeworld.nu asgaard.morphos-team.net"
+#define QW_DEFAULT_MASTER_SERVERS "master.quakeworld.nu qwmaster.fodquake.net master.quakeservers.net"
 #define QW_DEFAULT_MASTER_SERVER_PORT 27000
 
 static cvar_t masters_list = {"masters", QW_DEFAULT_MASTER_SERVERS};
