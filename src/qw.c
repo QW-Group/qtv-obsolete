@@ -59,15 +59,23 @@ void BuildServerData(sv_t *tv, netmsg_t *msg, int servercount)
 	WriteString(msg, "\"\n");
 }
 
-int SendList(sv_t *qtv, int first, const filename_t *list, int svc, netmsg_t *msg)
+int SendList(sv_t *qtv, int first, const filename_t *list, int svc, int svc_extended, netmsg_t *msg)
 {
 	int i;
 
-	WriteByte(msg, svc);
-	WriteByte(msg, first);
-	for (i = first+1; i < 256; i++)
+	if (first > 0xff)
 	{
-//		printf("write %i: %s\n", i, list[i].name);
+		WriteByte(msg, svc_extended);
+		WriteShort(msg, first);
+	}
+	else
+	{
+		WriteByte(msg, svc);
+		WriteByte(msg, first);
+	}
+
+	for (i = first+1; i < MAX_MODELS; i++)
+	{
 		WriteString(msg, list[i].name);
 		if (!*list[i].name)	//fixme: this probably needs testing for where we are close to the limit
 		{	//no more
@@ -75,14 +83,14 @@ int SendList(sv_t *qtv, int first, const filename_t *list, int svc, netmsg_t *ms
 			return -1;
 		}
 
-		if (msg->cursize > 768)
-		{	//truncate
+		if (msg->cursize > 768 && ((i-1)&0xff) != 0)
+		{	//truncate as long as count does not become zero
 			i--;
 			break;
 		}
 	}
 	WriteByte(msg, 0);
-	WriteByte(msg, i);
+	WriteByte(msg, i & 0xff);
 
 	return i;
 }
@@ -172,8 +180,12 @@ void WriteEntityState(sv_t *tv, netmsg_t *msg, entity_state_t *es)
 	}
 }
 
+void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entity_state_t *to, netmsg_t *msg, qbool force);
+
 int SendCurrentBaselines(sv_t *tv, int cursize, netmsg_t *msg, int maxbuffersize, int i)
 {
+	entity_state_t nullst = {0};
+
 	if (i < 0 || i >= MAX_ENTITIES)
 		return i;
 
@@ -186,9 +198,16 @@ int SendCurrentBaselines(sv_t *tv, int cursize, netmsg_t *msg, int maxbuffersize
 
 		if (tv->entity[i].baseline.modelindex)
 		{
-			WriteByte(msg, svc_spawnbaseline);
-			WriteShort(msg, i);
-			WriteEntityState(tv, msg, &tv->entity[i].baseline);
+			if (tv->extension_flags_fte1 & FTE_PEXT_SPAWNSTATIC2)
+			{
+				WriteByte(msg, svc_fte_spawnbaseline2);
+				SV_WriteDelta(tv, i, &nullst, &tv->entity[i].baseline, msg, true);
+			} else
+			{
+				WriteByte(msg, svc_spawnbaseline);
+				WriteShort(msg, i);
+				WriteEntityState(tv, msg, &tv->entity[i].baseline);
+			}
 		}
 	}
 
@@ -241,6 +260,8 @@ int SendStaticSounds(sv_t *tv, int cursize, netmsg_t *msg, int maxbuffersize, in
 
 int SendStaticEntities(sv_t *tv, int cursize, netmsg_t *msg, int maxbuffersize, int i)
 {
+	entity_state_t nullst = {0};
+
 	if (i < 0 || i >= MAX_STATICENTITIES)
 		return i;
 
@@ -253,8 +274,15 @@ int SendStaticEntities(sv_t *tv, int cursize, netmsg_t *msg, int maxbuffersize, 
 		if (!tv->spawnstatic[i].modelindex)
 			continue;
 
-		WriteByte(msg, svc_spawnstatic);
-		WriteEntityState(tv, msg, &tv->spawnstatic[i]);
+		if (tv->extension_flags_fte1 & FTE_PEXT_SPAWNSTATIC2)
+		{
+			WriteByte(msg, svc_fte_spawnstatic2);
+			SV_WriteDelta(tv, i, &nullst, &tv->spawnstatic[i], msg, true);
+		} else
+		{
+			WriteByte(msg, svc_spawnstatic);
+			WriteEntityState(tv, msg, &tv->spawnstatic[i]);
+		}
 	}
 
 	return i;
@@ -301,8 +329,40 @@ void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entit
 {
 	unsigned int i;
 	unsigned int bits;
+	unsigned int evenmorebits;
 
 	bits = 0;
+	evenmorebits = 0;
+
+	if (entnum >= 512)
+	{
+		if (entnum >= 1024)
+		{
+			if (entnum >= 1024 + 512)
+			{
+				evenmorebits |= U_FTE_ENTITYDBL;
+			}
+			evenmorebits |= U_FTE_ENTITYDBL2;
+		}
+		else
+		{
+			evenmorebits |= U_FTE_ENTITYDBL;
+		}
+	}
+
+	if (from->modelindex != to->modelindex)
+	{
+		bits |= U_MODEL;
+		if (to->modelindex > 255)
+		{
+			if (to->modelindex > 512)
+			{
+				bits &= ~U_MODEL;
+			}
+			evenmorebits |= U_FTE_MODELDBL;
+		}
+	}
+
 	if (from->angles[0] != to->angles[0])
 		bits |= U_ANGLE1;
 	if (from->angles[1] != to->angles[1])
@@ -321,17 +381,26 @@ void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entit
 		bits |= U_COLORMAP;
 	if (from->skinnum != to->skinnum)
 		bits |= U_SKIN;
-	if (from->modelindex != to->modelindex)
-		bits |= U_MODEL;
 	if (from->frame != to->frame)
 		bits |= U_FRAME;
 	if (from->effects != to->effects)
 		bits |= U_EFFECTS;
 
+	if (to->trans != from->trans)
+		evenmorebits |= U_FTE_TRANS;
+
+	if (to->colourmod[0] != from->colourmod[0] ||
+		to->colourmod[1] != from->colourmod[1] ||
+		to->colourmod[2] != from->colourmod[2])
+		evenmorebits |= U_FTE_COLOURMOD;
+
 	if (bits & 255)
 		bits |= U_MOREBITS;
 
-
+	if (evenmorebits&0xff00)
+		evenmorebits |= U_FTE_YETMORE;
+	if (evenmorebits&0x00ff)
+		bits |= U_FTE_EVENMORE;
 
 	if (!bits && !force)
 		return;
@@ -341,16 +410,18 @@ void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entit
 
 	if (bits & U_MOREBITS)
 		WriteByte (msg, bits&255);
-/*
-#ifdef PROTOCOLEXTENSIONS
-	if (bits & U_EVENMORE)
+
+	if (bits & U_FTE_EVENMORE)
 		WriteByte (msg, evenmorebits&255);
-	if (evenmorebits & U_YETMORE)
+
+	if (evenmorebits & U_FTE_YETMORE)
 		WriteByte (msg, (evenmorebits>>8)&255);
-#endif
-*/
+
 	if (bits & U_MODEL)
 		WriteByte (msg,	to->modelindex&255);
+	else if (evenmorebits & U_FTE_MODELDBL)
+		WriteShort (msg, to->modelindex);
+
 	if (bits & U_FRAME)
 		WriteByte (msg, to->frame);
 	if (bits & U_COLORMAP)
@@ -371,6 +442,16 @@ void SV_WriteDelta(sv_t* tv, int entnum, const entity_state_t *from, const entit
 		WriteCoord (tv, msg, to->origin[2]);
 	if (bits & U_ANGLE3)
 		WriteAngle (tv, msg, to->angles[2]);
+
+	if (evenmorebits & U_FTE_TRANS)
+		WriteByte (msg, to->trans);
+
+	if (evenmorebits & U_FTE_COLOURMOD)
+	{
+		WriteByte (msg, to->colourmod[0]);
+		WriteByte (msg, to->colourmod[1]);
+		WriteByte (msg, to->colourmod[2]);
+	}
 }
 
 void Prox_SendInitialEnts(sv_t *qtv, oproxy_t *prox, netmsg_t *msg)

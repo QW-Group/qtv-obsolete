@@ -819,7 +819,7 @@ static void Clcmd_New_f(sv_t *qtv, oproxy_t *prox)
 }
 */
 
-static void Clcmd_send_list(sv_t *qtv, oproxy_t *prox, int svc)
+static void Clcmd_send_list(sv_t *qtv, oproxy_t *prox, filename_t *list, int svc, int svc_extended)
 {
 	char buffer[MAX_MSGLEN*8];
 	netmsg_t msg;
@@ -844,7 +844,7 @@ static void Clcmd_send_list(sv_t *qtv, oproxy_t *prox, int svc)
 
 	for (prespawn = 0;prespawn >= 0;)
 	{
-		prespawn = SendList(qtv, prespawn, svc == svc_soundlist ? qtv->soundlist : qtv->modellist, svc, &msg);
+		prespawn = SendList(qtv, prespawn, list, svc, svc_extended, &msg);
 		Prox_SendMessage(&g_cluster, prox, msg.data, msg.cursize, dem_read, (unsigned)-1);
 		msg.cursize = 0;
 	}
@@ -866,7 +866,7 @@ static void Clcmd_Soundlist_f(sv_t *qtv, oproxy_t *prox)
 		return;
 	}
 
-	Clcmd_send_list(qtv, prox, svc_soundlist);
+	Clcmd_send_list(qtv, prox, qtv->soundlist, svc_soundlist, svc_fte_soundlistshort_UNUSED);
 }
 
 static void Clcmd_Modellist_f(sv_t *qtv, oproxy_t *prox)
@@ -877,7 +877,7 @@ static void Clcmd_Modellist_f(sv_t *qtv, oproxy_t *prox)
 		return;
 	}
 
-	Clcmd_send_list(qtv, prox, svc_modellist);
+	Clcmd_send_list(qtv, prox, qtv->modellist, svc_modellist, svc_fte_modellistshort);
 }
 
 static void Clcmd_Spawn_f(sv_t *qtv, oproxy_t *prox)

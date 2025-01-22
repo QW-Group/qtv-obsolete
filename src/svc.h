@@ -31,7 +31,7 @@ SVC(svc_spawnstatic)
 
 // 21-30
 
-SVC(svc_spawnstatic2_UNUSED)
+SVC(svc_fte_spawnstatic2)
 SVC(svc_spawnbaseline)
 
 SVC(svc_temp_entity)			// variable
@@ -91,17 +91,17 @@ SVC(svc_updatepl)				// [qbyte] [qbyte]
 SVC(svc_nails2)					// qwe - [qbyte] num [52 bits] nxyzpy 8 12 12 12 4 8
 
 SVC(svc_unused_55)
-SVC(svc_unused_56)
+SVC(svc_fte_soundlistshort_UNUSED)
 SVC(svc_unused_57)
 SVC(svc_unused_58)
 SVC(svc_unused_59)
-SVC(svc_unused_60)
+SVC(svc_fte_modellistshort)
 SVC(svc_unused_61)
 SVC(svc_unused_62)
 SVC(svc_unused_63)
 SVC(svc_unused_64)
 SVC(svc_unused_65)
-SVC(svc_unused_66)
+SVC(svc_fte_spawnbaseline2)
 SVC(svc_unused_67)
 SVC(svc_unused_68)
 SVC(svc_unused_69)
