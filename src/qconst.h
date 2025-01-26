@@ -20,13 +20,12 @@
 #define MAX_USERINFO			192
 #define MAX_INFO_KEY 			64
 
-#define MAX_LIST	256
-#define MAX_MODELS	MAX_LIST
-#define MAX_SOUNDS	MAX_LIST
-#define MAX_ENTITIES		512
-#define MAX_STATICSOUNDS	64
-#define MAX_STATICENTITIES	128
 #define MAX_LIGHTSTYLES		64
+#define MAX_ENTITIES		2048
+#define MAX_STATICENTITIES	2048
+#define MAX_MODELS			(MAX_ENTITIES + MAX_STATICENTITIES)
+#define MAX_STATICSOUNDS	256
+#define MAX_SOUNDS			256
 
 #define MAX_ENTITY_FRAMES	64
 
@@ -63,6 +62,8 @@
 #define	U_FRAME		(1<<13)
 #define	U_REMOVE	(1<<14)		// REMOVE this entity, don't add it
 #define	U_MOREBITS	(1<<15)
+#define U_FTE_EVENMORE	(1<<7)
+#define U_FTE_YETMORE	(1<<7)
 
 // if MOREBITS is set, these additional flags are read in next
 #define	U_ANGLE1	(1<<0)
@@ -72,6 +73,13 @@
 #define	U_SKIN		(1<<4)
 #define	U_EFFECTS	(1<<5)
 #define	U_SOLID		(1<<6)		// the entity should be solid for prediction
+
+// if EVENMORE is set
+#define U_FTE_MODELDBL   (1<<3)
+#define U_FTE_ENTITYDBL  (1<<5)
+#define U_FTE_ENTITYDBL2 (1<<6)
+#define U_FTE_TRANS      (1<<1)
+#define U_FTE_COLOURMOD  (1<<10)
 
 //======================================
 //flags on players in mvds

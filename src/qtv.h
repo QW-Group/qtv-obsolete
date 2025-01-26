@@ -73,7 +73,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 	#ifdef _MSC_VER
 		// Okay, so warnings are here to help... they're ugly though.
-		#pragma warning(disable: 4761)	// integral size mismatch in argument
 		#pragma warning(disable: 4244)	// conversion from float to short
 		#pragma warning(disable: 4018)	// signed/unsigned mismatch
 		#pragma warning(disable: 4267)	// size_t -> int conversions
@@ -81,6 +80,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 		#pragma warning(disable: 4100)	// unreferenced formal parameter
 		#pragma warning(disable: 4127)	// conditional expression is constant
 		#pragma warning(disable: 4706)	// assignment within conditional expression
+		#pragma warning(disable: 5045)	// spectre mitigation
+		#pragma warning(disable: 4061)	// unused enum
+		#pragma warning(disable: 4820)	// struct padding
 	#endif
 
 #elif defined(__CYGWIN__)
@@ -345,12 +347,14 @@ typedef struct
 typedef struct 
 {
 	unsigned char frame;
-	unsigned char modelindex;
+	unsigned short modelindex;
 	unsigned char colormap;
 	unsigned char skinnum;
 	float origin[3];
 	float angles[3];
 	unsigned char effects;
+	unsigned char trans;
+	unsigned char colourmod[3];
 } entity_state_t;
 
 typedef struct
@@ -1028,7 +1032,7 @@ void			Prox_FixName(sv_t *qtv, oproxy_t *prox);
 //
 
 void			BuildServerData(sv_t *tv, netmsg_t *msg, int servercount);
-int				SendList(sv_t *qtv, int first, const filename_t *list, int svc, netmsg_t *msg);
+int				SendList(sv_t *qtv, int first, const filename_t *list, int svc, int svc_extended, netmsg_t *msg);
 
 // Returns the next prespawn 'buffer' number to use, or -1 if no more.
 int				Prespawn(sv_t *qtv, int curmsgsize, netmsg_t *msg, int bufnum, int thisplayer);
@@ -1159,7 +1163,13 @@ void			SV_CheckUDPPort(cluster_t *cluster, int port);
 void			SV_UDP_Frame(cluster_t *cluster);
 
 // PROTOCOL EXTENSIONS
-#define FTE_PEXT_FLOATCOORDS  0x00008000
+#define FTE_PEXT_TRANS        0x00000008  // .alpha support
+#define FTE_PEXT_MODELDBL     0x00001000  // +256 to index if set, and if U_MODEL is unset read short
+#define FTE_PEXT_ENTITYDBL    0x00002000  // max of 1024 ents instead of 512
+#define FTE_PEXT_ENTITYDBL2   0x00004000  // max of 2048 ents
+#define FTE_PEXT_FLOATCOORDS  0x00008000  // supports floating point origins.
+#define FTE_PEXT_COLOURMOD    0x00080000  // Sends three bytes of color modification for an entity
+#define FTE_PEXT_SPAWNSTATIC2 0x00400000  // Sends an entity delta instead of a baseline.
 
 // Commented out extensions don't affect QTV stream
 //#define MVD_PEXT1_FLOATCOORDS       (1 <<  0) // FTE_PEXT_FLOATCOORDS but for entity/player coords only

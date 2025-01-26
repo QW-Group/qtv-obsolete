@@ -315,18 +315,14 @@ static void ParseCenterprint(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
 	ReadString(m, text, sizeof(text));
 }
 
-static int ParseList(sv_t *tv, netmsg_t *m, filename_t *list, int to, unsigned int mask)
+static int ParseList(sv_t *tv, netmsg_t *m, filename_t *list, size_t len, int to, unsigned int mask, qbool extended)
 {
-	int first;
-
-	first = ReadByte(m)+1;
-	for (; first < MAX_LIST; first++)
+	unsigned int first = (extended ? ReadShort(m) : ReadByte(m)) + 1;
+	for (; first < len; first++)
 	{
 		ReadString(m, list[first].name, sizeof(list[first].name));
-//		printf("read %i: %s\n", first, list[first].name);
 		if (!*list[first].name)
 			break;
-//		printf("%i: %s\n", first, list[first].name);
 	}
 
 	return ReadByte(m);
@@ -345,18 +341,6 @@ static void ParseEntityState(sv_t *tv, entity_state_t *es, netmsg_t *m)	// For b
 		es->origin[i] = ReadCoord(tv, m);
 		es->angles[i] = ReadAngle(tv, m);
 	}
-}
-
-static void ParseBaseline(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
-{
-	unsigned int entnum;
-	entnum = ReadShort(m);
-	if (entnum >= MAX_ENTITIES)
-	{
-		ParseError(m);
-		return;
-	}
-	ParseEntityState(tv, &tv->entity[entnum].baseline, m);
 }
 
 static void ParseStaticSound(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
@@ -385,19 +369,6 @@ static void ParseIntermission(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
 	ReadAngle(tv, m);
 	ReadAngle(tv, m);
 	ReadAngle(tv, m);
-}
-
-void ParseSpawnStatic(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
-{
-	if (tv->spawnstatic_count == MAX_STATICENTITIES)
-	{
-		tv->spawnstatic_count--;	// Don't be fatal.
-		Sys_ConPrintf(tv, "Too many static entities\n");
-	}
-
-	ParseEntityState(tv, &tv->spawnstatic[tv->spawnstatic_count], m);
-
-	tv->spawnstatic_count++;
 }
 
 //extern const usercmd_t nullcmd;
@@ -459,11 +430,10 @@ static void ParsePlayerInfo(sv_t *tv, netmsg_t *m, qbool clearoldplayers)
 	tv->players[num].active = true;
 }
 
-static int readentitynum(netmsg_t *m, unsigned int *retflags)
+static int readentitynum(netmsg_t *m, unsigned int *retflags, unsigned int *retmoreflags)
 {
 	int entnum;
-	unsigned int flags;
-//	unsigned short moreflags = 0;
+	unsigned int flags, moreflags;
 
 	flags = ReadShort(m);
 
@@ -475,33 +445,42 @@ static int readentitynum(netmsg_t *m, unsigned int *retflags)
 
 	entnum = flags&511;
 	flags &= ~511;
+	moreflags = 0;
 
 	if (flags & U_MOREBITS)
+		flags |= (unsigned int)ReadByte(m);
+
+	if (flags & U_FTE_EVENMORE)
 	{
-		flags |= ReadByte(m);
+		moreflags = (unsigned int)ReadByte(m);
+		if (moreflags & U_FTE_YETMORE)
+			moreflags |= (unsigned int)ReadByte(m) << 8;
+	}
 
-/*		if (flags & U_EVENMORE)
-			flags |= ReadByte(m)<<16;
-		if (flags & U_YETMORE)
-			flags |= ReadByte(m)<<24;
-*/	}
-
-/*	if (flags & U_ENTITYDBL)
-		entnum += 512;
-	if (flags & U_ENTITYDBL2)
+	if (moreflags & U_FTE_ENTITYDBL)
+ 		entnum += 512;
+	if (moreflags & U_FTE_ENTITYDBL2)
 		entnum += 1024;
-*/
+
 	*retflags = flags;
+	*retmoreflags = moreflags;
 
 	return entnum;
 }
 
-static void ParseEntityDelta(sv_t *tv, netmsg_t *m, entity_state_t *old, entity_state_t *new, unsigned int flags, entity_t *ent, qbool forcerelink)
+static void ParseEntityDelta(sv_t *tv, netmsg_t *m, entity_state_t *old, entity_state_t *new, unsigned int flags, unsigned int moreflags)
 {
 	memcpy(new, old, sizeof(entity_state_t));
 
 	if (flags & U_MODEL)
+	{
 		new->modelindex = ReadByte(m);
+		if (moreflags & U_FTE_MODELDBL)
+			new->modelindex += 256;
+	}
+	else if (moreflags & U_FTE_MODELDBL)
+		new->modelindex = ReadShort(m);
+
 	if (flags & U_FRAME)
 		new->frame = ReadByte(m);
 	if (flags & U_COLORMAP)
@@ -523,6 +502,61 @@ static void ParseEntityDelta(sv_t *tv, netmsg_t *m, entity_state_t *old, entity_
 		new->origin[2] = ReadCoord(tv, m);
 	if (flags & U_ANGLE3)
 		new->angles[2] = ReadAngle(tv, m);
+	if (moreflags & U_FTE_TRANS)
+		new->trans = ReadByte(m);
+	if (moreflags & U_FTE_COLOURMOD)
+	{
+		new->colourmod[0] = ReadByte(m);
+		new->colourmod[1] = ReadByte(m);
+		new->colourmod[2] = ReadByte(m);
+	}
+}
+
+
+void ParseSpawnStatic(sv_t *tv, netmsg_t *m, int to, unsigned int mask, qbool extended)
+{
+	if (tv->spawnstatic_count == MAX_STATICENTITIES)
+	{
+		tv->spawnstatic_count--;	// Don't be fatal.
+		Sys_ConPrintf(tv, "Too many static entities\n");
+	}
+
+	if (extended)
+	{
+		unsigned int flags, moreflags;
+		entity_state_t nullst = {0};
+		readentitynum(m, &flags, &moreflags);
+		ParseEntityDelta(tv, m, &nullst, &tv->spawnstatic[tv->spawnstatic_count], flags, moreflags);
+	}
+	else
+	{
+		ParseEntityState(tv, &tv->spawnstatic[tv->spawnstatic_count], m);
+	}
+
+	tv->spawnstatic_count++;
+}
+
+static void ParseBaseline(sv_t *tv, netmsg_t *m, int to, unsigned int mask, qbool extended)
+{
+	unsigned int flags, moreflags;
+	entity_state_t nullst = {0};
+	unsigned int entnum;
+
+
+	entnum = readentitynum(m, &flags, &moreflags);
+	if (entnum >= MAX_ENTITIES)
+	{
+		ParseError(m);
+		return;
+	}
+	if (extended)
+	{
+		ParseEntityDelta(tv, m, &nullst, &tv->entity[entnum].baseline, flags, moreflags);
+	}
+	else
+	{
+		ParseEntityState(tv, &tv->entity[entnum].baseline, m);
+	}
 }
 
 static int ExpandFrame(unsigned int newmax, frame_t *frame)
@@ -577,7 +611,7 @@ static void ParsePacketEntities(sv_t *tv, netmsg_t *m, int deltaframe)
 	int oldcount;
 	int newnum, oldnum;
 	int newindex, oldindex;
-	unsigned int flags;
+	unsigned int flags, moreflags;
 
 	if (deltaframe != -1)
 		deltaframe &= (MAX_ENTITY_FRAMES-1);
@@ -602,7 +636,7 @@ static void ParsePacketEntities(sv_t *tv, netmsg_t *m, int deltaframe)
 
 	for(;;)
 	{
-		newnum = readentitynum(m, &flags);
+		newnum = readentitynum(m, &flags, &moreflags);
 		if (!newnum)
 		{
 			// End of packet
@@ -652,7 +686,7 @@ static void ParsePacketEntities(sv_t *tv, netmsg_t *m, int deltaframe)
 
 			if (!ExpandFrame(newindex, newframe))
 				break;
-			ParseEntityDelta(tv, m, &tv->entity[newnum].baseline, &newframe->ents[newindex], flags, &tv->entity[newnum], true);
+			ParseEntityDelta(tv, m, &tv->entity[newnum].baseline, &newframe->ents[newindex], flags, moreflags);
 			newframe->entnums[newindex] = newnum;
 			newindex++;
 		}
@@ -668,7 +702,7 @@ static void ParsePacketEntities(sv_t *tv, netmsg_t *m, int deltaframe)
 			if (!ExpandFrame(newindex, newframe))
 				break;
 
-			ParseEntityDelta(tv, m, &oldframe->ents[oldindex], &newframe->ents[newindex], flags, &tv->entity[newnum], false);
+			ParseEntityDelta(tv, m, &oldframe->ents[oldindex], &newframe->ents[newindex], flags, moreflags);
 			newframe->entnums[newindex] = newnum;
 			newindex++;
 			oldindex++;
@@ -795,7 +829,7 @@ static void ParseUpdateStat(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
 static void ParseUpdateStatLong(sv_t *tv, netmsg_t *m, int to, unsigned int mask)
 {
 	unsigned int pnum;
-	int value;
+	ullong value;
 	int statnum;
 
 	statnum = ReadByte(m);
@@ -811,7 +845,7 @@ static void ParseUpdateStatLong(sv_t *tv, netmsg_t *m, int to, unsigned int mask
 		for (pnum = 0; pnum < MAX_CLIENTS; pnum++)
 		{
 			if (mask & (1<<pnum))
-				tv->players[pnum].stats[statnum] = value;
+				tv->players[pnum].stats[statnum] = (unsigned int)value;
 		}
 	}
 	else
@@ -1152,6 +1186,25 @@ void ShowMvdHeaderInfo(sv_t *tv, int length, int to, int mask)
 	}
 }
 
+void ParseModelList(sv_t *tv, int to, int mask, netmsg_t buf, qbool extended) {
+	int i;
+	const char* map;
+
+	i = ParseList(tv, &buf, tv->modellist, MAX_MODELS, to, mask, extended);
+
+	// If the map doesn't have friendly descriptive name, use basic instead
+	map = tv->modellist[1].name;
+	if (map[0] && !tv->mapname[0]) {
+		const char* trimmed = strchr(map, '/');
+
+		strlcpy(tv->mapname, trimmed && trimmed[1] ? trimmed + 1 : map, sizeof(tv->mapname));
+	}
+
+	if (!i) {
+		strlcpy(tv->status, "Prespawning", sizeof(tv->status));
+	}
+}
+
 void ParseMessage(sv_t *tv, char *buffer, int length, int to, int mask)
 {
 	svcOps_e svc;
@@ -1291,13 +1344,22 @@ void ParseMessage(sv_t *tv, char *buffer, int length, int to, int mask)
 			}
 			case svc_spawnstatic:
 			{
-				ParseSpawnStatic(tv, &buf, to, mask);
+				ParseSpawnStatic(tv, &buf, to, mask, false);
 				break;
 			}
-			// svc_spawnstatic2	21
+			case svc_fte_spawnstatic2:
+			{
+				ParseSpawnStatic(tv, &buf, to, mask, true);
+				break;
+			}
 			case svc_spawnbaseline:
 			{
-				ParseBaseline(tv, &buf, to, mask);
+				ParseBaseline(tv, &buf, to, mask, false);
+				break;
+			}
+			case svc_fte_spawnbaseline2:
+			{
+				ParseBaseline(tv, &buf, to, mask, true);
 				break;
 			}
 			case svc_temp_entity:
@@ -1397,26 +1459,17 @@ void ParseMessage(sv_t *tv, char *buffer, int length, int to, int mask)
 			}
 			case svc_modellist:
 			{
-				const char* map;
-
-				i = ParseList(tv, &buf, tv->modellist, to, mask);
-
-				// If the map doesn't have friendly descriptive name, use basic instead
-				map = tv->modellist[1].name;
-				if (map[0] && !tv->mapname[0]) {
-					const char* trimmed = strchr(map, '/');
-
-					strlcpy(tv->mapname, trimmed && trimmed[1] ? trimmed + 1 : map, sizeof(tv->mapname));
-				}
-
-				if (!i) {
-					strlcpy(tv->status, "Prespawning", sizeof(tv->status));
-				}
+				ParseModelList(tv, to, mask, buf, false);
+				break;
+			}
+			case svc_fte_modellistshort:
+			{
+				ParseModelList(tv, to, mask, buf, true);
 				break;
 			}
 			case svc_soundlist:
 			{
-				i = ParseList(tv, &buf, tv->soundlist, to, mask);
+				i = ParseList(tv, &buf, tv->soundlist, MAX_SOUNDS, to, mask, false);
 				if (!i)
 					strlcpy(tv->status, "Receiving modellist", sizeof(tv->status));
 				break;
@@ -1471,11 +1524,10 @@ void ParseMessage(sv_t *tv, char *buffer, int length, int to, int mask)
 //#endif
 			default:
 			{
-				unsigned int message_type;
+				unsigned char message_type;
 				buf.readpos = buf.startpos;
-				message_type = (unsigned int)ReadByte(&buf);
-				
-				if ((message_type >= 0) && (message_type < svc_strings_size))
+				message_type = ReadByte(&buf);
+				if (message_type < svc_strings_size)
 				{
 					Sys_ConPrintf(tv, "Can't handle %s (%i)\n", svc_strings[message_type], message_type);
 				}

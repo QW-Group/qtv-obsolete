@@ -328,14 +328,14 @@ void Net_SendConnectionMVD_1_0(sv_t *qtv, oproxy_t *prox)
 
 	for (prespawn = 0;prespawn >= 0;)
 	{
-		prespawn = SendList(qtv, prespawn, qtv->soundlist, svc_soundlist, &msg);
+		prespawn = SendList(qtv, prespawn, qtv->soundlist, svc_soundlist, svc_fte_soundlistshort_UNUSED, &msg);
 		Prox_SendMessage(&g_cluster, prox, msg.data, msg.cursize, dem_read, (unsigned)-1);
 		msg.cursize = 0;
 	}
 
 	for (prespawn = 0;prespawn >= 0;)
 	{
-		prespawn = SendList(qtv, prespawn, qtv->modellist, svc_modellist, &msg);
+		prespawn = SendList(qtv, prespawn, qtv->modellist, svc_modellist, svc_fte_modellistshort, &msg);
 		Prox_SendMessage(&g_cluster, prox, msg.data, msg.cursize, dem_read, (unsigned)-1);
 		msg.cursize = 0;
 	}
