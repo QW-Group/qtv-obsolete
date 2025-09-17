@@ -1,3 +1,7 @@
+# This repo is obsolete, and not maintained.
+# The new, go-based QTV can be found here: https://github.com/QW-Group/qtv
+
+
 # QTV: a QuakeWorld match broadcasting tool 
 
 
