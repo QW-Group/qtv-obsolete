@@ -2,7 +2,7 @@ name: build targets
 on: [pull_request]
 jobs:
   build:
-    if: github.repository == 'QW-Group/qtv'
+    if: github.repository == 'QW-Group/qtv-obsolete'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
