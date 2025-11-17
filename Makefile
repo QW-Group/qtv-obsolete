@@ -15,13 +15,13 @@ OBJS = src/cmd.o src/crc.o src/cvar.o src/forward.o src/forward_pending.o src/in
        src/msg.o src/net_utils.o src/parse.o src/qw.o src/source.o src/source_cmds.o src/sys.o src/build.o src/token.o src/httpsv.o src/httpsv_generate.o \
        src/cl_cmds.o src/fs.o src/ban.o src/udp.o src/sha3.o
 
-qtv: $(OBJS) src/qtv.h src/qconst.h
+qtv-obsolete: $(OBJS) src/qtv.h src/qconst.h
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@.db -lm
 	$(STRIP) $(STRIPFLAGS) $@.db -o $@.bin
 
-qtv.exe: *.c *.h
-	$(MAKE) qtv
-	mv qtv.bin qtv.exe
+qtv-obsolete.exe: *.c *.h
+	$(MAKE) qtv-obsolete
+	mv qtv-obsolete.bin qtv-obsolete.exe
 
 clean:
-	rm -rf qtv.bin qtv.exe qtv.db *.o
+	rm -rf qtv-obsolete.bin qtv-obsolete.exe qtv-obsolete.db *.o

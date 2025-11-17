@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.9.0)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 # Set project name and languge.
-project(qtv C)
+project(qtv-obsolete C)
 
 
 ######################################################################################################
